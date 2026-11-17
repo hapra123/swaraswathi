@@ -15,7 +15,7 @@ import { LatencyDiagnosticsPanel } from './components/LatencyDiagnosticsPanel';
 import { TestToneGenerator } from './components/TestToneGenerator';
 import type { PitchClass } from './types/music';
 import type { StableNote } from './audio/noteStabilizer';
-import type { PitchDetectionResult, FeedbackSuppressionConfig } from './types/audio';
+import type { PitchDetectionResult } from './types/audio';
 import { AudioEngine } from './audio/audioEngine';
 import { midiToFrequency } from './utils/frequencyToNote';
 
@@ -26,18 +26,6 @@ function App() {
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [showDiagnosticsDrawer, setShowDiagnosticsDrawer] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
-
-  // Anti-Feedback & Adaptive VAD Configuration
-  const [feedbackConfig, setFeedbackConfig] = useState<FeedbackSuppressionConfig>({
-    enabled: true,
-    outputMode: 'speaker',
-    sensitivity: 1.0,
-    noiseGateThreshold: 0.006,
-  });
-
-  const handleFeedbackConfigChange = useCallback((changes: Partial<FeedbackSuppressionConfig>) => {
-    setFeedbackConfig(prev => ({ ...prev, ...changes }));
-  }, []);
 
   // 1. Microphone capture
   const { status, sourceNode, errorMessage, startMicrophone, stopMicrophone } = useMicrophone();
@@ -85,21 +73,18 @@ function App() {
     stopManualNote,
     handleDirectAction,
     processRmsFrame,
-    acousticRef,
   } = useHarmonium(melodyState, tonicMidi);
 
   // Direct action bridge ref for the AudioWorklet loop
   const directActionRef = useRef<((res: PitchDetectionResult, note: StableNote | null) => void) | null>(null);
 
-  // 2. Optimized AudioWorklet YIN pitch detection pipeline with Output-Reference Anti-Feedback
+  // 2. Optimized AudioWorklet YIN pitch detection pipeline
   const { raw, stable, latency } = usePitchDetection(
     sourceNode,
     tonic,
     tonicOctave,
     isListening,
-    (res, s) => directActionRef.current?.(res, s),
-    acousticRef,
-    feedbackConfig
+    (res, s) => directActionRef.current?.(res, s)
   );
 
   // Wire direct dispatch callback into the audio loop (synchronous, 0ms React state dependency)
@@ -120,12 +105,10 @@ function App() {
     const engine = AudioEngine.getInstance();
     await engine.resume();
     if (status !== 'connected') {
-      await startMicrophone({
-        echoCancellation: feedbackConfig.outputMode === 'speaker',
-      });
+      await startMicrophone();
     }
     setIsListening(true);
-  }, [status, startMicrophone, feedbackConfig.outputMode]);
+  }, [status, startMicrophone]);
 
   const handleTestHarmoniumSound = useCallback(async () => {
     const engine = AudioEngine.getInstance();
@@ -165,7 +148,7 @@ function App() {
             {/* Quick Sa Badge & Toggle */}
             <button
               onClick={() => setShowSettingsDrawer(prev => !prev)}
-              className="text-xs bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1 hover:bg-amber-500/20 transition-all font-mono"
+              className="text-xs bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1 hover:bg-amber-500/20 transition-all font-mono cursor-pointer"
               title="Click to change Tonic Sa"
             >
               <span className="text-[10px] text-zinc-400 font-sans">Sa:</span>
@@ -217,21 +200,13 @@ function App() {
 
             <button
               onClick={handleTestHarmoniumSound}
-              className="py-3 px-3.5 rounded-2xl font-semibold text-xs bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-amber-500/30 transition-all flex items-center gap-1.5 active:scale-95 shadow-md"
+              className="py-3 px-3.5 rounded-2xl font-semibold text-xs bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-amber-500/30 transition-all flex items-center gap-1.5 active:scale-95 shadow-md cursor-pointer"
               title="Test Harmonium Note (C4)"
             >
               <span>🔊</span>
               <span className="hidden sm:inline">Test Sound</span>
             </button>
           </div>
-
-          {/* Real-time Bleed Shield Badge */}
-          {raw?.isFeedbackSuppressed && (
-            <div className="text-[10px] text-amber-300 bg-amber-500/15 border border-amber-500/30 px-3 py-0.5 rounded-full font-medium flex items-center gap-1.5 animate-pulse">
-              <span>🛡️</span>
-              <span>Phone speaker bleed shielded • Listening for singer</span>
-            </div>
-          )}
         </section>
 
         {/* ── CENTRE: Live Indian Swara & Singing Display ── */}
@@ -270,9 +245,6 @@ function App() {
           rhythm={rhythm}
           voicingDescription={voicingDescription}
           tonicName={`${tonic}${tonicOctave}`}
-          feedbackConfig={feedbackConfig}
-          onFeedbackConfigChange={handleFeedbackConfigChange}
-          isFeedbackSuppressed={raw?.isFeedbackSuppressed}
         />
 
         {/* ── TOUCH-FRIENDLY HARMONIUM KEYBOARD ── */}
@@ -383,9 +355,9 @@ function App() {
               <div>
                 <button
                   onClick={() => setShowDebug(d => !d)}
-                  className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
+                  className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  {showDebug ? '▼' : '▶'} Raw Telemetry & VAD Parameters
+                  {showDebug ? '▼' : '▶'} Raw Telemetry & Audio Parameters
                 </button>
 
                 {showDebug && (
@@ -423,16 +395,6 @@ function App() {
                     <div>
                       <div className="text-zinc-600 mb-0.5">Cents Deviation</div>
                       <div className="text-amber-400">{stable?.note?.cents !== undefined ? `${stable.note.cents >= 0 ? '+' : ''}${stable.note.cents}¢` : '—'}</div>
-                    </div>
-                    <div>
-                      <div className="text-zinc-600 mb-0.5">Speaker Bleed Shield</div>
-                      <div className={raw?.isFeedbackSuppressed ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
-                        {raw?.isFeedbackSuppressed ? 'REJECTED BLEED' : 'CLEAR'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-zinc-600 mb-0.5">Dynamic VAD Floor</div>
-                      <div className="text-green-400">{raw?.dynamicThreshold ? `${(raw.dynamicThreshold * 1000).toFixed(1)} mRMS` : '—'}</div>
                     </div>
                     <div>
                       <div className="text-zinc-600 mb-0.5">Drone Stops</div>

@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import type { AccompanimentMode, AccompanimentIntensity } from '../types/accompaniment';
 import type { RhythmAnalysis } from '../audio/rhythmEngine';
-import type { FeedbackSuppressionConfig } from '../types/audio';
 
 interface AudioControlsProps {
   accompanimentMode: AccompanimentMode;
@@ -24,9 +23,6 @@ interface AudioControlsProps {
   rhythm: RhythmAnalysis;
   voicingDescription: string;
   tonicName: string;
-  feedbackConfig: FeedbackSuppressionConfig;
-  onFeedbackConfigChange: (cfg: Partial<FeedbackSuppressionConfig>) => void;
-  isFeedbackSuppressed?: boolean;
 }
 
 export const AudioControls: React.FC<AudioControlsProps> = ({
@@ -49,9 +45,6 @@ export const AudioControls: React.FC<AudioControlsProps> = ({
   rhythm,
   voicingDescription,
   tonicName,
-  feedbackConfig,
-  onFeedbackConfigChange,
-  isFeedbackSuppressed = false,
 }) => {
   const [showMixerSettings, setShowMixerSettings] = useState(false);
 
@@ -159,7 +152,7 @@ export const AudioControls: React.FC<AudioControlsProps> = ({
 
           <button
             onClick={() => onDroneUsePaChange(!droneUsePa)}
-            className="text-[11px] px-2 py-1 bg-zinc-900 border border-zinc-700/60 rounded-md text-zinc-300 hover:text-amber-300"
+            className="text-[11px] px-2 py-1 bg-zinc-900 border border-zinc-700/60 rounded-md text-zinc-300 hover:text-amber-300 cursor-pointer"
             title="Toggle between Fifth (Pa) and Fourth (Ma)"
           >
             {droneUsePa ? 'Pa (5th)' : 'Ma (4th)'}
@@ -184,19 +177,14 @@ export const AudioControls: React.FC<AudioControlsProps> = ({
         </div>
       </div>
 
-      {/* ── Expandable Mixer & Speaker Anti-Feedback Drawer ── */}
+      {/* ── Expandable Mixer & Sound Settings Drawer ── */}
       <div>
         <button
           onClick={() => setShowMixerSettings(prev => !prev)}
-          className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 transition-colors py-1"
+          className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 transition-colors py-1 cursor-pointer"
         >
           <span>{showMixerSettings ? '▼' : '▶'}</span>
-          <span>⚙️ Sound Mixer & Phone Speaker Settings</span>
-          {isFeedbackSuppressed && (
-            <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.2 rounded-full font-semibold animate-pulse">
-              Bleed Shield Active
-            </span>
-          )}
+          <span>⚙️ Sound Mixer & Voicing Settings</span>
         </button>
 
         {showMixerSettings && (
@@ -274,81 +262,6 @@ export const AudioControls: React.FC<AudioControlsProps> = ({
                 >
                   Octave 3 (Madhya Mid)
                 </button>
-              </div>
-            </div>
-
-            {/* Phone Speaker Anti-Feedback Controls */}
-            <div className="border-t border-zinc-800/60 pt-3 flex flex-col gap-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                  <span>📱 Phone Speaker Anti-Feedback</span>
-                </span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
-                  Hardware AEC + 4-Layer VAD
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                {/* Audio Output Mode */}
-                <div className="flex flex-col gap-1">
-                  <span className="text-zinc-400">Audio Output</span>
-                  <div className="grid grid-cols-2 gap-1 p-0.5 bg-zinc-900 rounded-lg border border-zinc-800">
-                    <button
-                      onClick={() => onFeedbackConfigChange({ outputMode: 'speaker', enabled: true })}
-                      className={`py-1 px-1 rounded text-[11px] font-medium transition-all ${
-                        feedbackConfig.outputMode === 'speaker'
-                          ? 'bg-amber-500 text-black font-bold shadow'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      📱 Phone
-                    </button>
-                    <button
-                      onClick={() => onFeedbackConfigChange({ outputMode: 'headphones', enabled: false })}
-                      className={`py-1 px-1 rounded text-[11px] font-medium transition-all ${
-                        feedbackConfig.outputMode === 'headphones'
-                          ? 'bg-amber-500 text-black font-bold shadow'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      🎧 Earphones
-                    </button>
-                  </div>
-                </div>
-
-                {/* Mic Sensitivity */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-400">Sensitivity</span>
-                    <span className="font-mono text-zinc-300">{feedbackConfig.sensitivity.toFixed(1)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.1"
-                    value={feedbackConfig.sensitivity}
-                    onChange={(e) => onFeedbackConfigChange({ sensitivity: parseFloat(e.target.value) })}
-                    className="accent-amber-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-                  />
-                </div>
-
-                {/* Noise Gate */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-400">Noise Floor</span>
-                    <span className="font-mono text-zinc-300">{(feedbackConfig.noiseGateThreshold * 1000).toFixed(0)} mRMS</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.002"
-                    max="0.020"
-                    step="0.001"
-                    value={feedbackConfig.noiseGateThreshold}
-                    onChange={(e) => onFeedbackConfigChange({ noiseGateThreshold: parseFloat(e.target.value) })}
-                    className="accent-amber-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-                  />
-                </div>
               </div>
             </div>
 

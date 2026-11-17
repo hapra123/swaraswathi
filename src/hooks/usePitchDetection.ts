@@ -2,9 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AudioEngine } from '../audio/audioEngine';
 import { PitchDetector } from '../audio/pitchDetector';
-import type { OutputAcousticReference } from '../audio/pitchDetector';
 import { NoteStabilizer } from '../audio/noteStabilizer';
-import type { PitchDetectionResult, LatencyBreakdown, FeedbackSuppressionConfig } from '../types/audio';
+import type { PitchDetectionResult, LatencyBreakdown } from '../types/audio';
 import type { PitchClass } from '../types/music';
 import type { StableNote } from '../audio/noteStabilizer';
 
@@ -20,9 +19,7 @@ export function usePitchDetection(
   tonic: PitchClass,
   tonicOctave: number,
   enabled: boolean,
-  onDirectNoteAction?: (result: PitchDetectionResult, stableNote: StableNote | null) => void,
-  acousticRef?: OutputAcousticReference | null,
-  feedbackConfig?: Partial<FeedbackSuppressionConfig>
+  onDirectNoteAction?: (result: PitchDetectionResult, stableNote: StableNote | null) => void
 ): PitchState {
   const [raw, setRaw] = useState<PitchDetectionResult | null>(null);
   const [stable, setStable] = useState<StableNote | null>(null);
@@ -110,9 +107,6 @@ export function usePitchDetection(
     );
 
     detector.setTonic(tonic, tonicOctave);
-    if (acousticRef) detector.setAcousticReference(acousticRef);
-    if (feedbackConfig) detector.setFeedbackSuppressionConfig(feedbackConfig);
-
     let isCancelled = false;
     detector.connect(sourceNode).then(() => {
       if (!isCancelled) {
@@ -133,18 +127,6 @@ export function usePitchDetection(
       detectorRef.current.setTonic(tonic, tonicOctave);
     }
   }, [tonic, tonicOctave]);
-
-  useEffect(() => {
-    if (detectorRef.current) {
-      detectorRef.current.setAcousticReference(acousticRef ?? null);
-    }
-  }, [acousticRef]);
-
-  useEffect(() => {
-    if (detectorRef.current && feedbackConfig) {
-      detectorRef.current.setFeedbackSuppressionConfig(feedbackConfig);
-    }
-  }, [feedbackConfig]);
 
   return {
     raw,

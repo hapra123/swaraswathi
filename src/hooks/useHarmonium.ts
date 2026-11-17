@@ -11,7 +11,6 @@ import { RhythmEngine } from '../audio/rhythmEngine';
 import type { AccompanimentMode, AccompanimentIntensity } from '../types/accompaniment';
 import type { RhythmAnalysis } from '../audio/rhythmEngine';
 import type { MelodyTrackingState } from '../audio/melodyTracker';
-import type { OutputAcousticReference } from '../audio/pitchDetector';
 
 export interface HarmoniumState {
   // Accompaniment mode
@@ -50,7 +49,6 @@ export interface HarmoniumState {
   stopManualNote: () => void;
   handleDirectAction: (melodyState: MelodyTrackingState, tonicMidi: number) => void;
   processRmsFrame: (rms: number, timestamp: number) => void;
-  acousticRef: OutputAcousticReference;
 }
 
 export function useHarmonium(
@@ -225,11 +223,6 @@ export function useHarmonium(
     setRhythm(r);
   }, []);
 
-  const acousticRef = useRef<OutputAcousticReference>({
-    getOutputRms: () => samplerRef.current?.getOutputRms() ?? 0,
-    getActiveMidis: () => samplerRef.current?.getActiveMidis() ?? [],
-  }).current;
-
   return {
     accompanimentMode,
     accompanimentIntensity,
@@ -256,6 +249,5 @@ export function useHarmonium(
     stopManualNote,
     handleDirectAction,
     processRmsFrame,
-    acousticRef,
   };
 }

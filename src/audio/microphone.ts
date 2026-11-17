@@ -17,9 +17,9 @@ export interface MicrophoneHandle {
 
 const DEFAULT_CONFIG: MicrophoneConfig = {
   channelCount: 1,
-  echoCancellation: true,  // Hardware AEC enabled: cancels speaker playback on mobile phones & laptops
-  noiseSuppression: false, // Keep off: spectral subtraction can distort musical harmonic pitch
-  autoGainControl: false,  // Keep off: AGC distorts vocal dynamics and boosts quiet speaker bleed
+  echoCancellation: false, // Keep off: echo cancellation can corrupt pitch readings
+  noiseSuppression: false, // Keep off: suppression distorts harmonic content
+  autoGainControl: false,  // Keep off: AGC changes amplitude non-linearly
 };
 
 /**

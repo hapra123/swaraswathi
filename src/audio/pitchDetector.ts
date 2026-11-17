@@ -1,19 +1,12 @@
 // src/audio/pitchDetector.ts
 // Real-time streaming pitch detection pipeline powered by AudioWorklet.
 // Completely decouples audio processing from React and requestAnimationFrame.
-// Incorporates multi-layered acoustic feedback cancellation and adaptive VAD for speaker playback.
 
 import { OptimizedYin } from './yin';
 import { calculateRms } from './microphone';
-import type { PitchDetectionResult, PitchDetectorOptions, FeedbackSuppressionConfig } from '../types/audio';
+import type { PitchDetectionResult, PitchDetectorOptions } from '../types/audio';
 import { mapFrequencyToNoteInfo } from '../utils/sargamMapper';
-import { frequencyToWesternNote } from '../utils/frequencyToNote';
 import type { PitchClass } from '../types/music';
-
-export interface OutputAcousticReference {
-  getOutputRms: () => number;
-  getActiveMidis: () => number[];
-}
 
 const DEFAULT_OPTIONS: PitchDetectorOptions = {
   yinThreshold: 0.12,
@@ -46,18 +39,6 @@ export class PitchDetector {
 
   private yinDetector: OptimizedYin;
 
-  // ── Acoustic Feedback & Adaptive VAD Subsystem ─────────────────────────────
-  private acousticRef: OutputAcousticReference | null = null;
-  private adaptiveNoiseFloor = 0.004;
-  private feedbackSuppressionEnabled = true;
-  private sensitivity = 1.0;            // 0.5 (low sensitivity) to 2.0 (high sensitivity)
-  private baseNoiseGateThreshold = 0.005; // Base noise gate RMS
-  private speakerCouplingRatio = 0.22;   // Typical mobile phone speaker-to-mic acoustic coupling (18%–25%)
-
-  // Jitter tracking buffer for electronic tone rejection
-  private recentFrequencies: number[] = [];
-  private maxJitterHistory = 7;
-
   constructor(
     audioContext: AudioContext,
     onDirectAudio?: (result: PitchDetectionResult) => void,
@@ -82,17 +63,6 @@ export class PitchDetector {
 
   public setUiCallback(cb: (result: PitchDetectionResult) => void): void {
     this.onUiTelemetry = cb;
-  }
-
-  public setAcousticReference(ref: OutputAcousticReference | null): void {
-    this.acousticRef = ref;
-  }
-
-  public setFeedbackSuppressionConfig(config: Partial<FeedbackSuppressionConfig>): void {
-    if (config.enabled !== undefined) this.feedbackSuppressionEnabled = config.enabled;
-    if (config.sensitivity !== undefined) this.sensitivity = Math.max(0.4, Math.min(2.5, config.sensitivity));
-    if (config.noiseGateThreshold !== undefined) this.baseNoiseGateThreshold = Math.max(0.001, config.noiseGateThreshold);
-    if (config.speakerCouplingRatio !== undefined) this.speakerCouplingRatio = config.speakerCouplingRatio;
   }
 
   public async connect(sourceNode: AudioNode): Promise<void> {
@@ -131,10 +101,7 @@ export class PitchDetector {
         this.processAudioBuffer(channelData, performance.now());
       };
       this.sourceNode.connect(this.scriptNode);
-      const silentGain = this.audioContext.createGain();
-      silentGain.gain.setValueAtTime(0, this.audioContext.currentTime);
-      this.scriptNode.connect(silentGain);
-      silentGain.connect(this.audioContext.destination);
+      this.scriptNode.connect(this.audioContext.destination);
     }
   }
 
@@ -173,37 +140,12 @@ export class PitchDetector {
 
   /**
    * Continuous PCM buffer processing callback directly from AudioWorklet.
-   * Runs advanced 4-layer VAD & Output-Reference Self-Feedback Rejection.
    */
   private processAudioBuffer(buffer: Float32Array, timestamp: number): void {
     const rms = calculateRms(buffer);
-
-    // 1. Query instantaneous speaker output reference
-    const outputRms = this.acousticRef?.getOutputRms() ?? 0;
-    const activeOutputMidis = this.acousticRef?.getActiveMidis() ?? [];
-
-    // 2. Adaptive Noise-Floor Tracking (only update when speakers are quiet to avoid contamination)
-    if (outputRms < 0.015) {
-      if (rms < this.adaptiveNoiseFloor) {
-        this.adaptiveNoiseFloor = this.adaptiveNoiseFloor * 0.95 + rms * 0.05; // Quick downward tracking
-      } else if (rms < this.adaptiveNoiseFloor * 2.0) {
-        this.adaptiveNoiseFloor = this.adaptiveNoiseFloor * 0.998 + rms * 0.002; // Slow upward tracking
-      }
-    }
-    this.adaptiveNoiseFloor = Math.max(0.002, Math.min(0.035, this.adaptiveNoiseFloor));
-
-    // 3. Compute dynamic VAD threshold with expected speaker acoustic coupling
-    const expectedBleed = this.feedbackSuppressionEnabled ? outputRms * this.speakerCouplingRatio : 0;
-    const dynamicThreshold = Math.max(
-      this.baseNoiseGateThreshold,
-      this.adaptiveNoiseFloor * 1.45,
-      expectedBleed * 1.20
-    ) / this.sensitivity;
-
-    const isSilent = rms < dynamicThreshold;
+    const isSilent = rms < this.options.silenceThresholdRms;
 
     if (isSilent) {
-      this.recentFrequencies = [];
       const silentResult: PitchDetectionResult = {
         frequency: null,
         confidence: 0,
@@ -212,8 +154,6 @@ export class PitchDetector {
         note: null,
         timestamp,
         yinComputeTimeMs: 0,
-        isFeedbackSuppressed: false,
-        dynamicThreshold,
       };
 
       // Direct audio dispatch (zero latency)
@@ -227,7 +167,7 @@ export class PitchDetector {
       return;
     }
 
-    // 4. High performance YIN pitch estimation (singer level exceeds noise gate & speaker bleed)
+    // High performance YIN pitch estimation
     const yinRes = this.yinDetector.detect(
       buffer,
       this.audioContext.sampleRate,
@@ -239,96 +179,12 @@ export class PitchDetector {
 
     const isConfident = yinRes.frequency !== null && yinRes.confidence >= this.options.confidenceThreshold;
 
-    if (!isConfident || !yinRes.frequency) {
-      this.recentFrequencies = [];
-      const unvoicedResult: PitchDetectionResult = {
-        frequency: null,
-        confidence: yinRes.confidence,
-        rms,
-        isSilent: true,
-        note: null,
-        timestamp,
-        tau: yinRes.tau,
-        yinComputeTimeMs: yinRes.computeTimeMs,
-        isFeedbackSuppressed: false,
-        dynamicThreshold,
-      };
-      this.onDirectAudio?.(unvoicedResult);
-      if (timestamp - this.lastUiDispatchTime >= this.uiDispatchIntervalMs) {
-        this.lastUiDispatchTime = timestamp;
-        this.onUiTelemetry?.(unvoicedResult);
-      }
-      return;
-    }
-
-    const detectedFreq = yinRes.frequency;
-
-    // 5. Track pitch jitter for human vocal cord vs electronic speaker discrimination
-    this.recentFrequencies.push(detectedFreq);
-    if (this.recentFrequencies.length > this.maxJitterHistory) {
-      this.recentFrequencies.shift();
-    }
-
-    // 6. Output-Reference Acoustic Feedback Discriminator
-    let isFeedback = false;
-    if (this.feedbackSuppressionEnabled && activeOutputMidis.length > 0) {
-      const western = frequencyToWesternNote(detectedFreq);
-      if (western) {
-        // Is candidate note identical to any currently sounding harmonium note (drone or melody)?
-        const matchesActiveHarmoniumNote = activeOutputMidis.includes(western.midiNote);
-
-        if (matchesActiveHarmoniumNote) {
-          // Calculate pitch variance (jitter) over recent frames
-          let jitterHz = 1.0;
-          if (this.recentFrequencies.length >= 4) {
-            const avg = this.recentFrequencies.reduce((a, b) => a + b, 0) / this.recentFrequencies.length;
-            const variance = this.recentFrequencies.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / this.recentFrequencies.length;
-            jitterHz = Math.sqrt(variance);
-          }
-
-          // An electronic oscillator from the phone speaker has virtually 0 Hz jitter (< 0.28 Hz)
-          // A human vocal cord always exhibits natural micro-tremor and breath unsteadiness (jitter >= 0.45 Hz)
-          const isStationarySpeakerTone = jitterHz < 0.28;
-
-          // If the pitch is a stationary speaker tone AND input volume is not significantly louder than speaker bleed
-          const isBelowSingingHeadroom = rms < expectedBleed * 2.1;
-
-          if (isStationarySpeakerTone && isBelowSingingHeadroom) {
-            isFeedback = true;
-          }
-        }
-      }
-    }
-
-    if (isFeedback) {
-      // Acoustic feedback from phone speaker successfully suppressed!
-      const suppressedResult: PitchDetectionResult = {
-        frequency: null,
-        confidence: yinRes.confidence,
-        rms,
-        isSilent: true,
-        note: null,
-        timestamp,
-        tau: yinRes.tau,
-        yinComputeTimeMs: yinRes.computeTimeMs,
-        isFeedbackSuppressed: true,
-        dynamicThreshold,
-      };
-
-      this.onDirectAudio?.(suppressedResult);
-
-      if (timestamp - this.lastUiDispatchTime >= this.uiDispatchIntervalMs) {
-        this.lastUiDispatchTime = timestamp;
-        this.onUiTelemetry?.(suppressedResult);
-      }
-      return;
-    }
-
-    // 7. Legitimate human vocal note confirmed
-    const note = mapFrequencyToNoteInfo(detectedFreq, this.tonicPitchClass, this.tonicOctave);
+    const note = isConfident && yinRes.frequency
+      ? mapFrequencyToNoteInfo(yinRes.frequency, this.tonicPitchClass, this.tonicOctave)
+      : null;
 
     const result: PitchDetectionResult = {
-      frequency: detectedFreq,
+      frequency: isConfident ? yinRes.frequency : null,
       confidence: yinRes.confidence,
       rms,
       isSilent: false,
@@ -336,8 +192,6 @@ export class PitchDetector {
       timestamp,
       tau: yinRes.tau,
       yinComputeTimeMs: yinRes.computeTimeMs,
-      isFeedbackSuppressed: false,
-      dynamicThreshold,
     };
 
     // 1. Direct audio dispatch (runs synchronously without touching React)
