@@ -2,7 +2,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { AudioEngine } from '../audio/audioEngine';
 import { openMicrophone } from '../audio/microphone';
-import type { MicrophoneHandle } from '../audio/microphone';
+import type { MicrophoneHandle, MicrophoneConfig } from '../audio/microphone';
 import type { MicrophoneStatus } from '../types/audio';
 
 export interface UseMicrophoneReturn {
@@ -10,7 +10,7 @@ export interface UseMicrophoneReturn {
   micHandle: MicrophoneHandle | null;
   sourceNode: MediaStreamAudioSourceNode | null;
   errorMessage: string | null;
-  startMicrophone: () => Promise<void>;
+  startMicrophone: (config?: Partial<MicrophoneConfig>) => Promise<void>;
   stopMicrophone: () => void;
 }
 
@@ -19,7 +19,7 @@ export function useMicrophone(): UseMicrophoneReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const micHandleRef = useRef<MicrophoneHandle | null>(null);
 
-  const startMicrophone = useCallback(async () => {
+  const startMicrophone = useCallback(async (config?: Partial<MicrophoneConfig>) => {
     if (status === 'connected' || status === 'requesting') return;
     setStatus('requesting');
     setErrorMessage(null);
@@ -27,7 +27,7 @@ export function useMicrophone(): UseMicrophoneReturn {
     try {
       const engine = AudioEngine.getInstance();
       await engine.resume();
-      const handle = await openMicrophone(engine.context);
+      const handle = await openMicrophone(engine.context, config);
       micHandleRef.current = handle;
       setStatus('connected');
     } catch (err: unknown) {

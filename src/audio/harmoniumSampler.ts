@@ -36,12 +36,22 @@ export class HarmoniumSampler {
   // Custom PeriodicWave for rich Indian brass reed timbre
   private reedWaveform: PeriodicWave | null = null;
 
+  // Real-time output acoustic reference tapping for acoustic feedback cancellation
+  private outputAnalyser: AnalyserNode;
+  private outputAnalyserData: Float32Array;
+
   constructor(audioContext: AudioContext) {
     this.ctx = audioContext;
 
     // Master bus
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.85;
+
+    // Output reference tap (128 samples = ~2.6ms buffer, zero latency)
+    this.outputAnalyser = this.ctx.createAnalyser();
+    this.outputAnalyser.fftSize = 128;
+    this.outputAnalyserData = new Float32Array(this.outputAnalyser.fftSize);
+    this.masterGain.connect(this.outputAnalyser);
 
     // Melody bus
     this.melodyGain = this.ctx.createGain();
@@ -290,5 +300,37 @@ export class HarmoniumSampler {
 
   public setChordVolume(val: number): void {
     this.chordGain.gain.value = Math.max(0, Math.min(1, val));
+  }
+
+  // ── Real-Time Acoustic Feedback Reference ───────────────────────────────────
+
+  /**
+   * Returns the instantaneous RMS energy of the harmonium audio output.
+   * Used by PitchDetector to dynamically compute speaker acoustic bleed.
+   */
+  public getOutputRms(): number {
+    try {
+      this.outputAnalyser.getFloatTimeDomainData(this.outputAnalyserData as unknown as Float32Array<ArrayBuffer>);
+      let sum = 0;
+      const len = this.outputAnalyserData.length;
+      for (let i = 0; i < len; i++) {
+        sum += this.outputAnalyserData[i] * this.outputAnalyserData[i];
+      }
+      return Math.sqrt(sum / len);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Returns all MIDI note numbers currently sounding from the harmonium
+   * (Lead melody, supporting chords, and Sa-Pa drone).
+   */
+  public getActiveMidis(): number[] {
+    const list: number[] = [];
+    this.activeMelodyVoices.forEach((v, m) => { if (!v.isReleasing) list.push(m); });
+    this.activeChordVoices.forEach((v, m) => { if (!v.isReleasing) list.push(m); });
+    this.activeDroneVoices.forEach((v, m) => { if (!v.isReleasing) list.push(m); });
+    return list;
   }
 }

@@ -9,6 +9,16 @@ export type MicrophoneStatus =
   | 'error' 
   | 'unsupported';
 
+export type AudioOutputMode = 'speaker' | 'headphones';
+
+export interface FeedbackSuppressionConfig {
+  enabled: boolean;
+  outputMode: AudioOutputMode;
+  sensitivity: number;        // 0.5 to 2.0 (default 1.0)
+  noiseGateThreshold: number; // 0.002 to 0.020 (default 0.006)
+  speakerCouplingRatio?: number; // e.g. 0.22
+}
+
 export interface PitchDetectionResult {
   frequency: number | null;
   confidence: number;
@@ -18,6 +28,8 @@ export interface PitchDetectionResult {
   timestamp: number;
   tau?: number;
   yinComputeTimeMs?: number;
+  isFeedbackSuppressed?: boolean;
+  dynamicThreshold?: number;
 }
 
 export interface PitchDetectorOptions {
